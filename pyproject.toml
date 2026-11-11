@@ -1,0 +1,13 @@
+[project]
+name = "ha-blueprints"
+version = "0.1.0"
+description = "Home Assistant blueprints from EndOfTheLine-HA"
+requires-python = ">=3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120

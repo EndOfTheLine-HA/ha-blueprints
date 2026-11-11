@@ -1,0 +1,280 @@
+blueprint:
+  name: Irrigation zone flow check (pump power as a flow meter)
+  description: >-
+    Uses a well or booster pump's power reading as a flow meter for sprinkler zones.
+
+
+    When a zone turns on, it waits for the pump to start drawing power. If the pump never
+    picks up, the valve probably did not open (wire, solenoid or relay channel) and you
+    get an alert. For zones with an expected flow, it then averages pump power over two
+    windows, converts it to flow, and alerts when the zone runs well above normal (often a
+    broken head or pipe) or well below it (clogged nozzles or a partly open valve).
+
+
+    The conversion is linear: flow = (power - baseline power) / power per flow unit.
+    Calibrate it on your own pump from a few zones with known flow. A variable-speed pump
+    hunts on small zones, so keep the minimum tolerance wide enough for them.
+  domain: automation
+  author: EndOfTheLine-HA
+  homeassistant:
+    min_version: "2024.10.0"
+  source_url: https://github.com/EndOfTheLine-HA/ha-blueprints/blob/main/blueprints/automation/irrigation_zone_flow_check.yaml
+  input:
+    zones_section:
+      name: Zones
+      icon: mdi:sprinkler-variant
+      input:
+        zones:
+          name: Zone switches
+          description: The switches that open each sprinkler zone.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: switch
+        expected_flow:
+          name: Expected flow per zone
+          description: >-
+            Normal flow for each zone, in your flow unit, as a mapping from entity ID to
+            number, for example `switch.front_lawn: 12.5`. Zones left out get only the
+            valve check.
+          default: {}
+          selector:
+            object: {}
+    pump_section:
+      name: Pump
+      icon: mdi:pump
+      input:
+        pump_power:
+          name: Pump power
+          description: Instant pump power in watts. Used for the valve check.
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: power
+        pump_power_mean:
+          name: Averaged pump power (optional)
+          description: >-
+            A time-weighted average of pump power in watts, such as a Statistics helper
+            with the "average step" characteristic over about 90 seconds. Leave empty to
+            sample the instant power instead.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: power
+        running_power:
+          name: Pump running above
+          description: Power that shows the pump is pumping, in watts.
+          default: 650
+          selector:
+            number:
+              min: 1
+              max: 20000
+              unit_of_measurement: W
+              mode: box
+        baseline_power:
+          name: Baseline power
+          description: Power subtracted before converting to flow, in watts.
+          default: 450
+          selector:
+            number:
+              min: 0
+              max: 20000
+              unit_of_measurement: W
+              mode: box
+        power_per_flow_unit:
+          name: Power per flow unit
+          description: Watts above the baseline for one unit of flow.
+          default: 80
+          selector:
+            number:
+              min: 0.1
+              max: 10000
+              step: 0.1
+              unit_of_measurement: W
+              mode: box
+        flow_unit:
+          name: Flow unit
+          description: The unit used in messages, for example GPM or L/min.
+          default: GPM
+          selector:
+            text: {}
+    check_section:
+      name: Timing and tolerance
+      icon: mdi:timer-outline
+      collapsed: true
+      input:
+        start_delay:
+          name: Wait before checking
+          description: Seconds after the zone turns on before watching the pump.
+          default: 20
+          selector:
+            number:
+              min: 0
+              max: 600
+              unit_of_measurement: s
+              mode: box
+        open_timeout:
+          name: Time allowed for the pump to start
+          description: Seconds to wait for pump power before reporting a valve that did not open.
+          default: 70
+          selector:
+            number:
+              min: 1
+              max: 900
+              unit_of_measurement: s
+              mode: box
+        sample_interval:
+          name: Time between flow samples
+          description: Seconds before each of the two power samples.
+          default: 90
+          selector:
+            number:
+              min: 1
+              max: 900
+              unit_of_measurement: s
+              mode: box
+        tolerance_percent:
+          name: Tolerance
+          description: Allowed difference from the expected flow, in percent.
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 200
+              unit_of_measurement: "%"
+              mode: box
+        tolerance_minimum:
+          name: Minimum tolerance
+          description: Smallest allowed difference, in your flow unit. Keeps small zones from false alarms.
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 1000
+              step: 0.1
+              mode: box
+        flow_conditions:
+          name: Only check flow when
+          description: >-
+            Optional conditions that must all be true for the flow part to run, for
+            example that the pump drive is not in a fault state. The valve check always runs.
+          default: []
+          selector:
+            condition: {}
+    alert_section:
+      name: Alert
+      icon: mdi:bell-alert
+      input:
+        alert_actions:
+          name: Alert actions
+          description: >-
+            What to do when a check fails. These variables are available: alert_type
+            (valve_not_open, flow_high or flow_low), title, message, zone, zone_name,
+            measured_flow, expected_flow and flow_unit. The default creates a persistent
+            notification.
+          default:
+            - action: persistent_notification.create
+              data:
+                title: "{{ title }}"
+                message: "{{ message }}"
+                notification_id: "irrigation_flow_check_{{ zone }}"
+          selector:
+            action: {}
+
+mode: parallel
+max: 20
+
+variables:
+  pump_power: !input pump_power
+  pump_power_mean_input: !input pump_power_mean
+  expected_flow_map: !input expected_flow
+  running_power: !input running_power
+  baseline_power: !input baseline_power
+  power_per_flow_unit: !input power_per_flow_unit
+  flow_unit: !input flow_unit
+  tolerance_percent: !input tolerance_percent
+  tolerance_minimum: !input tolerance_minimum
+  mean_sensor: "{{ pump_power_mean_input if pump_power_mean_input else pump_power }}"
+
+triggers:
+  - trigger: state
+    entity_id: !input zones
+    from: "off"
+    to: "on"
+
+actions:
+  - variables:
+      zone: "{{ trigger.entity_id }}"
+      zone_name: "{{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
+      expected: "{{ (expected_flow_map or {}).get(trigger.entity_id, 0) | float(0) }}"
+      started: "{{ now().hour % 12 or 12 }}:{{ now().strftime('%M %p') }}"
+  - delay:
+      seconds: !input start_delay
+  - condition: template
+    value_template: "{{ is_state(zone, 'on') }}"
+  - wait_template: "{{ states(pump_power) | float(0) > running_power | float(0) or not is_state(zone, 'on') }}"
+    timeout:
+      seconds: !input open_timeout
+    continue_on_timeout: true
+  - if:
+      - condition: template
+        value_template: "{{ not wait.completed and is_state(zone, 'on') }}"
+    then:
+      - variables:
+          alert_type: valve_not_open
+          measured_flow: 0
+          expected_flow: "{{ expected }}"
+          title: Sprinkler valve did not open
+          message: >-
+            {{ zone_name }} turned on at {{ started }}, but the pump did not start drawing
+            power (it reads {{ states(pump_power) }} W). The valve probably did not open:
+            check its wire, solenoid or relay channel.
+      - choose: []
+        default: !input alert_actions
+      - stop: Valve did not open
+  - condition: template
+    value_template: "{{ expected > 0 }}"
+  - delay:
+      seconds: !input sample_interval
+  - condition: template
+    value_template: "{{ is_state(zone, 'on') }}"
+  - condition: and
+    conditions: !input flow_conditions
+  - variables:
+      first_sample: "{{ states(mean_sensor) | float(-1) }}"
+  - delay:
+      seconds: !input sample_interval
+  - condition: template
+    value_template: "{{ is_state(zone, 'on') }}"
+  - condition: and
+    conditions: !input flow_conditions
+  - variables:
+      second_sample: "{{ states(mean_sensor) | float(-1) }}"
+  - variables:
+      mean_power: >-
+        {{ ((first_sample + second_sample) / 2) | round(0)
+           if first_sample > 0 and second_sample > 0 else -1 }}
+  - variables:
+      measured_flow: >-
+        {{ ((mean_power - baseline_power | float(0)) / power_per_flow_unit | float(1)) | round(1)
+           if mean_power > baseline_power | float(0) else 0 }}
+      limit: >-
+        {{ [expected * tolerance_percent | float(0) / 100, tolerance_minimum | float(0)] | max | round(1) }}
+  - condition: template
+    value_template: "{{ mean_power > 0 and (measured_flow - expected) | abs > limit }}"
+  - variables:
+      alert_type: "{{ 'flow_high' if measured_flow > expected else 'flow_low' }}"
+      expected_flow: "{{ expected }}"
+      title: "Sprinkler flow {{ 'high' if measured_flow > expected else 'low' }}"
+      message: >-
+        {{ zone_name }} has been flowing about {{ measured_flow }} {{ flow_unit }} against its
+        normal {{ expected }} {{ flow_unit }} (alert band plus or minus {{ limit }} {{ flow_unit }}).
+        {{ 'High flow usually means a broken head or pipe.' if measured_flow > expected
+           else 'Low flow usually means clogged nozzles or filter, or a valve that only partly opened.' }}
+        Estimated from pump power.
+  - choose: []
+    default: !input alert_actions

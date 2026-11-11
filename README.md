@@ -57,8 +57,9 @@ The conversion is a straight line: **flow = (power - baseline power) / power per
 
    Zones left out get the valve check only.
 
-Example: 11 GPM reads 1330 W and 5 GPM reads 850 W. Power per flow unit is (1330 - 850) / (11 - 5) = 80 W,
-and baseline power is 1330 - 11 x 80 = 450 W. Those are the blueprint's defaults; replace them with yours.
+Example: 14 GPM reads 1900 W and 6 GPM reads 1100 W. Power per flow unit is (1900 - 1100) / (14 - 6) = 100 W,
+and baseline power is 1900 - 14 x 100 = 500 W. These are made-up numbers to show the arithmetic. Baseline
+power and power per flow unit have no defaults, so the automation will not save until you enter your own.
 The flow unit is just a label, so liters per minute work the same way.
 
 ### Settings
@@ -70,8 +71,8 @@ The flow unit is just a label, so liters per minute work the same way.
 | Pump power | | Instant power, used for the valve check. |
 | Averaged pump power | empty | Used for the flow samples when set. |
 | Pump running above | 650 W | Power that shows the pump is pumping. Set it above the pump's idle draw. |
-| Baseline power | 450 W | From calibration. |
-| Power per flow unit | 80 W | From calibration. |
+| Baseline power | required | From calibration. |
+| Power per flow unit | required | From calibration. |
 | Flow unit | GPM | Used in messages. |
 | Wait before checking | 20 s | Time after the zone turns on before watching the pump. |
 | Time allowed for the pump to start | 70 s | After this, a pump that has not started counts as a valve that did not open. |

@@ -16,8 +16,10 @@ POWER = "sensor.pump_power"
 MEAN = "sensor.pump_power_mean"
 EVENT = "test_flow_check_alert"
 
-# With the default 450 W baseline and 80 W per unit, 1450 W is 12.5 GPM.
-NORMAL_W = "1450"
+# The README's example calibration: 500 W baseline and 100 W per unit, so 1750 W is 12.5 GPM.
+BASELINE_W = 500
+PER_UNIT_W = 100
+NORMAL_W = "1750"
 
 
 def automation_config(**inputs) -> dict:
@@ -25,6 +27,8 @@ def automation_config(**inputs) -> dict:
         "zones": [ZONE, OTHER],
         "expected_flow": {ZONE: 12.5},
         "pump_power": POWER,
+        "baseline_power": BASELINE_W,
+        "power_per_flow_unit": PER_UNIT_W,
         "start_delay": 0,
         "open_timeout": 1,
         "sample_interval": 1,
@@ -94,7 +98,7 @@ async def test_high_flow_is_reported(hass):
     await run_for(hass, 3.5)
     assert [a.data["alert_type"] for a in alerts] == ["flow_high"]
     data = alerts[0].data
-    assert float(data["measured_flow"]) == 31.9
+    assert float(data["measured_flow"]) == 25.0
     assert float(data["expected_flow"]) == 12.5
     assert data["flow_unit"] == "GPM"
     assert "broken head or pipe" in data["message"]
@@ -105,20 +109,20 @@ async def test_low_flow_is_reported(hass):
     hass.states.async_set(ZONE, "on", {"friendly_name": "Front lawn"})
     await run_for(hass, 3.5)
     assert [a.data["alert_type"] for a in alerts] == ["flow_low"]
-    assert float(alerts[0].data["measured_flow"]) == 3.1
+    assert float(alerts[0].data["measured_flow"]) == 2.0
 
 
 async def test_difference_inside_the_percent_band_is_quiet(hass):
-    # 12.5 expected; 30 percent is 3.75, so 15.6 (1700 W) is inside the band.
-    alerts = await setup(hass, power="1700")
+    # 12.5 expected; 30 percent is 3.75, so 15.5 (2050 W) is inside the band.
+    alerts = await setup(hass, power="2050")
     hass.states.async_set(ZONE, "on", {"friendly_name": "Front lawn"})
     await run_for(hass, 3.5)
     assert alerts == []
 
 
 async def test_minimum_tolerance_protects_small_zones(hass):
-    # 5 expected; 30 percent is only 1.5, but the 3 unit minimum keeps 7.5 (1050 W) quiet.
-    alerts = await setup(hass, power="1050", expected_flow={ZONE: 5})
+    # 5 expected; 30 percent is only 1.5, but the 3 unit minimum keeps 7.5 (1250 W) quiet.
+    alerts = await setup(hass, power="1250", expected_flow={ZONE: 5})
     hass.states.async_set(ZONE, "on", {"friendly_name": "Front lawn"})
     await run_for(hass, 3.5)
     assert alerts == []
@@ -201,3 +205,20 @@ async def test_default_alert_creates_a_persistent_notification(hass):
     await run_for(hass, 2)
     assert created and created[0]["domain"] == "persistent_notification"
     assert created[0]["service_data"]["notification_id"] == f"irrigation_flow_check_{ZONE}"
+
+
+async def test_calibration_inputs_are_required(hass):
+    hass.states.async_set(ZONE, "off", {"friendly_name": "Front lawn"})
+    hass.states.async_set(POWER, "3000", {"unit_of_measurement": "W", "device_class": "power"})
+    config = automation_config()
+    del config["use_blueprint"]["input"]["baseline_power"]
+    del config["use_blueprint"]["input"]["power_per_flow_unit"]
+    await async_setup_component(hass, "automation", {"automation": [config]})
+    await hass.async_block_till_done()
+    state = hass.states.get("automation.zone_flow_check")
+    assert state is None or state.state == "unavailable"
+    alerts: list[Event] = []
+    hass.bus.async_listen(EVENT, alerts.append)
+    hass.states.async_set(ZONE, "on", {"friendly_name": "Front lawn"})
+    await run_for(hass, 2)
+    assert alerts == []

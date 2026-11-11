@@ -77,8 +77,9 @@ blueprint:
               mode: box
         baseline_power:
           name: Baseline power
-          description: Power subtracted before converting to flow, in watts.
-          default: 450
+          description: >-
+            Power subtracted before converting to flow, in watts. Required: there is no
+            default, because it depends on your pump. See Calibrating in the README.
           selector:
             number:
               min: 0
@@ -87,8 +88,9 @@ blueprint:
               mode: box
         power_per_flow_unit:
           name: Power per flow unit
-          description: Watts above the baseline for one unit of flow.
-          default: 80
+          description: >-
+            Watts above the baseline for one unit of flow. Required: there is no default,
+            because it depends on your pump. See Calibrating in the README.
           selector:
             number:
               min: 0.1

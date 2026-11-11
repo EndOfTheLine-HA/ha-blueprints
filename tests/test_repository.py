@@ -38,6 +38,14 @@ def test_blueprint_is_valid_and_points_at_itself(path: Path):
     assert blueprint.metadata["homeassistant"]["min_version"]
 
 
+def test_flow_check_calibration_has_no_defaults():
+    # Calibration differs for every pump, so these must come from the user.
+    path = ROOT / "blueprints" / "automation" / "irrigation_zone_flow_check.yaml"
+    blueprint = Blueprint(load_yaml_dict(str(path)), expected_domain="automation", schema=BLUEPRINT_SCHEMA)
+    for name in ("baseline_power", "power_per_flow_unit"):
+        assert "default" not in blueprint.inputs[name], name
+
+
 @pytest.mark.parametrize("path", BLUEPRINT_FILES, ids=lambda p: p.name)
 def test_readme_has_an_import_link_for_each_blueprint(path: Path):
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
